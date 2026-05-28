@@ -2,20 +2,42 @@ import os
 import uuid
 from typing import List
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
+from groq import Groq
 
 from graph.workflow import build_review_graph
 from graph.schemas import EmployeeInfo
 
-from fastapi.responses import StreamingResponse
-from groq import Groq
-from dotenv import load_dotenv
-import os
-
 load_dotenv()
-groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+
 app = FastAPI()
+
+groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "https://green-growth-ui.vercel.app",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.get("/")
+def health_check():
+    return {"status": "backend running"}
+
+
+@app.get("/ping")
+def ping():
+    return {"message": "backend alive"}
+
 
 @app.get("/stream-test")
 def stream_test():
@@ -25,7 +47,7 @@ def stream_test():
             messages=[
                 {
                     "role": "user",
-                    "content": "Explain why this expense review system is useful in 5 bullet points."
+                    "content": "Explain why this expense review system is useful in 5 bullet points.",
                 }
             ],
             temperature=0.2,
@@ -40,22 +62,6 @@ def stream_test():
     return StreamingResponse(generate(), media_type="text/plain")
 
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-review_graph = build_review_graph()
-
-
-@app.get("/")
-def health_check():
-    return {"status": "backend running"}
-
-
 @app.post("/review")
 async def review_submission(
     employee_name: str = Form(...),
@@ -63,6 +69,8 @@ async def review_submission(
     grade: str = Form(...),
     files: List[UploadFile] = File(...),
 ):
+    review_graph = build_review_graph()
+
     submission_id = str(uuid.uuid4())
     upload_dir = f"uploads/{submission_id}"
     os.makedirs(upload_dir, exist_ok=True)
