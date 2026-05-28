@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+python-multipart
+pydantic
+langgraph
+langchain
+chromadb
+pypdf
+python-dotenv
+groq
+sentence-transformers
+chromadb
+pypdf
