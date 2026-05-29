@@ -1,7 +1,116 @@
-from fastapi import FastAPI
+import os
+import uuid
+from typing import List
 
+from fastapi import FastAPI, UploadFile, File, Form
+from fastapi.middleware.cors import CORSMiddleware
+
+from graph.workflow import build_review_graph
+from graph.schemas import EmployeeInfo
+
+from fastapi.responses import StreamingResponse
+from groq import Groq
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 app = FastAPI()
 
+@app.get("/stream-test")
+def stream_test():
+    def generate():
+        stream = groq_client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {
+                    "role": "user",
+                    "content": "Explain why this expense review system is useful in 5 bullet points."
+                }
+            ],
+            temperature=0.2,
+            stream=True,
+        )
+
+        for chunk in stream:
+            content = chunk.choices[0].delta.content
+            if content:
+                yield content
+
+    return StreamingResponse(generate(), media_type="text/plain")
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+review_graph = build_review_graph()
+
+
 @app.get("/")
-def root():
-    return {"message": "working"}
+def health_check():
+    return {"status": "backend running"}
+
+
+@app.post("/review")
+async def review_submission(
+    employee_name: str = Form(...),
+    department: str = Form(...),
+    grade: str = Form(...),
+    files: List[UploadFile] = File(...),
+):
+    submission_id = str(uuid.uuid4())
+    upload_dir = f"uploads/{submission_id}"
+    os.makedirs(upload_dir, exist_ok=True)
+
+    receipts = []
+
+    for uploaded_file in files:
+        file_path = f"{upload_dir}/{uploaded_file.filename}"
+
+        with open(file_path, "wb") as file:
+            file.write(await uploaded_file.read())
+
+        receipts.append(
+            {
+                "file_name": uploaded_file.filename,
+                "file_path": file_path,
+                "file_type": uploaded_file.content_type,
+                "extracted": None,
+                "clauses": [],
+                "decision": None,
+            }
+        )
+
+    employee = EmployeeInfo(
+        employee_id=str(uuid.uuid4()),
+        name=employee_name,
+        department=department,
+        grade=grade,
+    )
+
+    initial_state = {
+        "submission_id": submission_id,
+        "employee": employee,
+        "receipts": receipts,
+        "current_index": 0,
+        "errors": [],
+        "summary": None,
+    }
+
+    result = review_graph.invoke(initial_state)
+
+    return result
+if __name__ == "__main__":
+    import uvicorn
+    
+    # Render sets the PORT environment variable dynamically. 
+    # Fall back to 8000 for local development.
+    port = int(os.environ.get("PORT", 8000))
+    
+    # "0.0.0.0" forces the app to listen on all public network interfaces
+    uvicorn.run("main:app", host="0.0.0.0", port=port)
