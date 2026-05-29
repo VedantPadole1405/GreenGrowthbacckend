@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+
 jobs:
   sync-to-hub:
     runs-on: ubuntu-latest
@@ -15,5 +16,10 @@ jobs:
           lfs: true
 
       - name: Push to Hub
-        # Replace HF_TOKEN_HERE with your actual hf_... token string
-        run: git push --force https://Vedant1405:HF_TOKEN_HERE@huggingface.co/spaces/Vedant1405/GreenGrowth main:main
+        run: |
+          # 1. Register the credentials safely in the Git environment
+          git config --global credential.helper store
+          echo "https://Vedant1405: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@huggingface.co" > ~/.git-credentials
+          
+          # 2. Push directly using the official Space Git link
+          git push --force https://huggingface.co/spaces/Vedant1405/GreenGrowth main:main
