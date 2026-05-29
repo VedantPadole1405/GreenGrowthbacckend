@@ -15,13 +15,15 @@ load_dotenv()
 
 app = FastAPI()
 
-groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+# Fallback mechanism: Uses environment variable if found, otherwise falls back to your hardcoded string
+GROQ_KEY = os.environ.get("GROQ_API_KEY") or "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"
+groq_client = Groq(api_key=GROQ_KEY)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
-        "https://your-vercel-app-url.vercel.app",
+        "https://green-growth-ui.vercel.app",  # Allowed your live Vercel application link
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -69,7 +71,7 @@ async def review_submission(
     grade: str = Form(...),
     files: List[UploadFile] = File(...),
 ):
-    # Build graph lazily so Render can start the server before loading heavy dependencies
+    # Build graph lazily so the host can start the server before loading heavy dependencies
     review_graph = build_review_graph()
 
     submission_id = str(uuid.uuid4())
