@@ -1,34 +1,43 @@
 import os
 import uuid
-from contextlib import asynccontextmanager
 from typing import List
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from groq import Groq
-from dotenv import load_dotenv
 
 from graph.workflow import build_review_graph
 from graph.schemas import EmployeeInfo
 
 load_dotenv()
+
+app = FastAPI()
+
 groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
-# Create a placeholder dictionary to hold your graph
-app_state = {}
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "https://your-vercel-app-url.vercel.app",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # This runs right AFTER the server binds to the port
-    print("Loading review graph...")
-    app_state["review_graph"] = build_review_graph()
-    print("Review graph loaded successfully!")
-    yield
-    # Clean up on shutdown if needed
-    app_state.clear()
 
-app = FastAPI(lifespan=lifespan)
+@app.get("/")
+def health_check():
+    return {"status": "backend running"}
+
+
+@app.get("/ping")
+def ping():
+    return {"message": "backend alive"}
+
 
 @app.get("/stream-test")
 def stream_test():
@@ -38,7 +47,7 @@ def stream_test():
             messages=[
                 {
                     "role": "user",
-                    "content": "Explain why this expense review system is useful in 5 bullet points."
+                    "content": "Explain why this expense review system is useful in 5 bullet points.",
                 }
             ],
             temperature=0.2,
@@ -53,23 +62,6 @@ def stream_test():
     return StreamingResponse(generate(), media_type="text/plain")
 
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "https://green-growth-ui.vercel.app",
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-
-@app.get("/")
-def health_check():
-    return {"status": "backend running"}
-
-
 @app.post("/review")
 async def review_submission(
     employee_name: str = Form(...),
@@ -77,6 +69,9 @@ async def review_submission(
     grade: str = Form(...),
     files: List[UploadFile] = File(...),
 ):
+    # Build graph lazily so Render can start the server before loading heavy dependencies
+    review_graph = build_review_graph()
+
     submission_id = str(uuid.uuid4())
     upload_dir = f"uploads/{submission_id}"
     os.makedirs(upload_dir, exist_ok=True)
@@ -116,16 +111,6 @@ async def review_submission(
         "summary": None,
     }
 
-    # Pull the review graph from the app state instead of the global scope
-    graph = app_state.get("review_graph")
-    if not graph:
-        return {"error": "Graph not initialized yet"}
+    result = review_graph.invoke(initial_state)
 
-    result = graph.invoke(initial_state)
     return result
-
-
-if __name__ == "__main__":
-    import uvicorn
-    port = int(os.environ.get("PORT", 10000))
-    uvicorn.run("main:app", host="0.0.0.0", port=port)
