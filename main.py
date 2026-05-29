@@ -1,21 +1,34 @@
 import os
 import uuid
+from contextlib import asynccontextmanager
 from typing import List
 
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
+from groq import Groq
+from dotenv import load_dotenv
 
 from graph.workflow import build_review_graph
 from graph.schemas import EmployeeInfo
 
-from fastapi.responses import StreamingResponse
-from groq import Groq
-from dotenv import load_dotenv
-import os
-
 load_dotenv()
 groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
-app = FastAPI()
+
+# Create a placeholder dictionary to hold your graph
+app_state = {}
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # This runs right AFTER the server binds to the port
+    print("Loading review graph...")
+    app_state["review_graph"] = build_review_graph()
+    print("Review graph loaded successfully!")
+    yield
+    # Clean up on shutdown if needed
+    app_state.clear()
+
+app = FastAPI(lifespan=lifespan)
 
 @app.get("/stream-test")
 def stream_test():
@@ -42,13 +55,14 @@ def stream_test():
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=[
+        "http://localhost:3000",
+        "https://green-growth-ui.vercel.app",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-review_graph = build_review_graph()
 
 
 @app.get("/")
@@ -102,15 +116,16 @@ async def review_submission(
         "summary": None,
     }
 
-    result = review_graph.invoke(initial_state)
+    # Pull the review graph from the app state instead of the global scope
+    graph = app_state.get("review_graph")
+    if not graph:
+        return {"error": "Graph not initialized yet"}
 
+    result = graph.invoke(initial_state)
     return result
+
+
 if __name__ == "__main__":
     import uvicorn
-    
-    # Render sets the PORT environment variable dynamically. 
-    # Fall back to 8000 for local development.
-    port = int(os.environ.get("PORT", 8000))
-    
-    # "0.0.0.0" forces the app to listen on all public network interfaces
+    port = int(os.environ.get("PORT", 10000))
     uvicorn.run("main:app", host="0.0.0.0", port=port)
